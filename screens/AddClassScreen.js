@@ -1,3 +1,4 @@
+// screens/AddClassScreen.js
 import React, { useState, useCallback } from 'react';
 import { Alert, View, StyleSheet, ScrollView, Text, FlatList } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';

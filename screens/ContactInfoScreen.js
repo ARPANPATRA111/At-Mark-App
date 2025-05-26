@@ -1,3 +1,4 @@
+// screens/ContactInfoScreen.js
 import React from 'react';
 import { View, Text, StyleSheet, SafeAreaView, Image, Linking, TouchableOpacity, Animated, Easing } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';

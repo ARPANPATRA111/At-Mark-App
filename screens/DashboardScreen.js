@@ -174,7 +174,7 @@ export default function DashboardScreen({ navigation }) {
         style={styles.addButton}
       />
       
-      <TouchableOpacity
+    <TouchableOpacity
       style={styles.helpButton}
       onPress={() => navigation.navigate('ContactInfoScreen')}
     >
