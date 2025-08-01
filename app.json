@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "At-Mark",
+    "slug": "ape",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.arpan111.ape"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "67dedb85-fde4-416e-9fab-27bca4533635"
+      }
+    },
+    "owner": "arpan111",
+    "plugins": [
+      "expo-sqlite"
+    ]
+  }
+}

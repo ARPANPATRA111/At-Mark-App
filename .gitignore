@@ -34,3 +34,8 @@ yarn-error.*
 
 # typescript
 *.tsbuildinfo
+Project report IMC.pdf
+t.txt
+SRS.pdf
+README.md
+.gitignore
