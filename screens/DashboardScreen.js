@@ -1,79 +1,67 @@
 // screens/DashboardScreen.js
 import React, { useState, useEffect } from 'react';
-import { View, Text, Alert, Modal, TouchableOpacity,StatusBar } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { View, Text, Alert, Modal, TouchableOpacity, StatusBar, StyleSheet } from 'react-native';
 import { SwipeListView } from 'react-native-swipe-list-view';
 import BaseScreen from '../components/BaseScreen';
 import CustomButton from '../components/CustomButton';
 import CustomTextInput from '../components/CustomTextInput';
+import { getClasses, updateClassName, deleteClass as dbDeleteClass } from '../services/db';
 import { colors, sizes, spacing } from '../theme';
-import { StyleSheet } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 
 export default function DashboardScreen({ navigation }) {
   const [classes, setClasses] = useState([]);
   const [editModalVisible, setEditModalVisible] = useState(false);
-  const [classToEdit, setClassToEdit] = useState('');
+  const [classToEdit, setClassToEdit] = useState(null);
   const [newClassName, setNewClassName] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
+  const loadClasses = async () => {
+    try {
+      setIsLoading(true);
+      const fetchedClasses = await getClasses();
+      setClasses(fetchedClasses);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to load classes.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', loadClasses);
+    return unsubscribe;
+  }, [navigation]);
+
   const editClass = (item) => {
     setClassToEdit(item);
-    setNewClassName(item);
+    setNewClassName(item.name);
     setEditModalVisible(true);
   };
 
-  const saveClassName = async () => {
-    if (newClassName.trim() === '') {
+  const saveClassNameHandler = async () => {
+    if (!classToEdit || newClassName.trim() === '') {
       Alert.alert('Error', 'Please enter a valid class name.');
       return;
     }
-    if (classes.includes(newClassName) && newClassName !== classToEdit) {
+    if (classes.some(c => c.name === newClassName && c.id !== classToEdit.id)) {
       Alert.alert('Error', 'A class with this name already exists.');
       return;
     }
     try {
-      // Update the classes array
-      const updatedClasses = classes.map((cls) =>
-        cls === classToEdit ? newClassName : cls
-      );
-      setClasses(updatedClasses);
-      await AsyncStorage.setItem('classes', JSON.stringify(updatedClasses));
-
-      // Update students key
-      const studentsData = await AsyncStorage.getItem(`students_${classToEdit}`);
-      if (studentsData) {
-        await AsyncStorage.setItem(`students_${newClassName}`, studentsData);
-        await AsyncStorage.removeItem(`students_${classToEdit}`);
-      }
-
-      // Update attendance records
-      const keys = await AsyncStorage.getAllKeys();
-      const attendanceKeys = keys.filter((key) =>
-        key.startsWith(`attendance_${classToEdit}_`)
-      );
-
-      for (const oldKey of attendanceKeys) {
-        const data = await AsyncStorage.getItem(oldKey);
-        const newKey = oldKey.replace(
-          `attendance_${classToEdit}_`,
-          `attendance_${newClassName}_`
-        );
-        await AsyncStorage.setItem(newKey, data);
-        await AsyncStorage.removeItem(oldKey);
-      }
-
+      await updateClassName(classToEdit.name, newClassName);
       setEditModalVisible(false);
+      loadClasses(); // Refresh the list
     } catch (error) {
       console.error('Error updating class name:', error);
       Alert.alert('Error', 'Failed to update class name.');
     }
   };
 
-  const deleteClass = async (item) => {
+  const deleteClassHandler = (item) => {
     Alert.alert(
       'Delete Class',
-      `Are you sure you want to delete the class "${item}"? This action cannot be undone.`,
+      `Are you sure you want to delete the class "${item.name}"? This action cannot be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -81,22 +69,8 @@ export default function DashboardScreen({ navigation }) {
           style: 'destructive',
           onPress: async () => {
             try {
-              // Remove from classes array
-              const updatedClasses = classes.filter((cls) => cls !== item);
-              setClasses(updatedClasses);
-              await AsyncStorage.setItem('classes', JSON.stringify(updatedClasses));
-
-              // Remove associated students
-              await AsyncStorage.removeItem(`students_${item}`);
-
-              // Remove associated attendance records
-              const keys = await AsyncStorage.getAllKeys();
-              const attendanceKeys = keys.filter((key) =>
-                key.startsWith(`attendance_${item}_`)
-              );
-              if (attendanceKeys.length > 0) {
-                await AsyncStorage.multiRemove(attendanceKeys);
-              }
+              await dbDeleteClass(item.name);
+              loadClasses(); // Refresh the list
             } catch (error) {
               console.error('Error deleting class:', error);
               Alert.alert('Error', 'Failed to delete class.');
@@ -110,8 +84,8 @@ export default function DashboardScreen({ navigation }) {
   const renderItem = ({ item }) => (
     <View style={styles.rowFront}>
       <CustomButton
-        title={item}
-        onPress={() => navigation.navigate('Class', { className: item })}
+        title={item.name}
+        onPress={() => navigation.navigate('Class', { className: item.name })}
         style={styles.classItem}
         textStyle={styles.classText}
         iconName="chevron-right"
@@ -120,39 +94,20 @@ export default function DashboardScreen({ navigation }) {
     </View>
   );
 
-  const renderHiddenItem = ({ item }, rowMap) => (
+  const renderHiddenItem = ({ item }) => (
     <View style={styles.rowBack}>
       <CustomButton
         onPress={() => editClass(item)}
-        // title="Edit"
         style={[styles.backRightBtn, styles.backRightBtnLeft]}
         iconName="edit"
       />
       <CustomButton
-        onPress={() => deleteClass(item)}
-        // title="Delete"
+        onPress={() => deleteClassHandler(item)}
         style={[styles.backRightBtn, styles.backRightBtnRight]}
         iconName="delete"
       />
     </View>
   );
-
-  useEffect(() => {
-    const loadClasses = async () => {
-      try {
-        const classesData = await AsyncStorage.getItem('classes');
-        if (classesData) setClasses(JSON.parse(classesData));
-      } catch (error) {
-        console.error(error);
-        Alert.alert('Error', 'Failed to load classes.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    const unsubscribe = navigation.addListener('focus', loadClasses);
-    return unsubscribe;
-  }, [navigation]);
 
   return (
     <BaseScreen style={styles.apt}>
@@ -163,23 +118,24 @@ export default function DashboardScreen({ navigation }) {
         renderHiddenItem={renderHiddenItem}
         rightOpenValue={-150}
         disableRightSwipe={true}
-        keyExtractor={(item) => item}
+        keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={styles.listContainer}
+        refreshing={isLoading}
+        onRefresh={loadClasses}
       />
 
       <CustomButton
-        // title=""
         onPress={() => navigation.navigate('AddClass')}
         iconName="add"
         style={styles.addButton}
       />
       
-    <TouchableOpacity
-      style={styles.helpButton}
-      onPress={() => navigation.navigate('ContactInfoScreen')}
-    >
-      <Icon name="help-outline" size={34} color={colors.white} />
-    </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.helpButton}
+        onPress={() => navigation.navigate('ContactInfoScreen')}
+      >
+        <Icon name="help-outline" size={34} color={colors.white} />
+      </TouchableOpacity>
 
       <Modal
         animationType="slide"
@@ -204,7 +160,7 @@ export default function DashboardScreen({ navigation }) {
               />
               <CustomButton
                 title="Save"
-                onPress={saveClassName}
+                onPress={saveClassNameHandler}
                 style={styles.saveButton}
               />
             </View>
@@ -217,7 +173,7 @@ export default function DashboardScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   listContainer: {
-    paddingBottom: sizes.base * 6, // Makes space for the add button
+    paddingBottom: sizes.base * 6,
   },
   classItem: {
     backgroundColor: colors.white,
