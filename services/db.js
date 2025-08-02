@@ -20,7 +20,7 @@ export const initDatabase = async () => {
         class_id INTEGER NOT NULL,
         name TEXT NOT NULL,
         roll_number TEXT NOT NULL,
-        FOREIGN KEY (class_id) REFERENCES classes (id),
+        FOREIGN KEY (class_id) REFERENCES classes (id) ON DELETE CASCADE,
         UNIQUE(class_id, roll_number)
       );
       
@@ -30,8 +30,8 @@ export const initDatabase = async () => {
         student_id INTEGER NOT NULL,
         date TEXT NOT NULL,
         present INTEGER DEFAULT 0,
-        FOREIGN KEY (class_id) REFERENCES classes (id),
-        FOREIGN KEY (student_id) REFERENCES students (id),
+        FOREIGN KEY (class_id) REFERENCES classes (id) ON DELETE CASCADE,
+        FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE,
         UNIQUE(class_id, student_id, date)
       );
     `);
@@ -111,11 +111,7 @@ export const deleteClass = async (className) => {
 
       const classId = classResult.id;
 
-      // Delete related records
-      await db.runAsync('DELETE FROM attendance WHERE class_id = ?', classId);
-      await db.runAsync('DELETE FROM students WHERE class_id = ?', classId);
-      
-      // Delete class
+      // Delete related records (attendance and students will be deleted via CASCADE)
       const result = await db.runAsync(
         'DELETE FROM classes WHERE id = ?',
         classId
@@ -174,6 +170,30 @@ export const getStudents = async (className) => {
   }
 };
 
+export const deleteStudent = async (studentId) => {
+    try {
+        // Attendance records will be deleted automatically due to CASCADE constraint
+        const result = await db.runAsync('DELETE FROM students WHERE id = ?', studentId);
+        return result.changes;
+    } catch (error) {
+        console.error('Error deleting student:', error);
+        throw error;
+    }
+};
+
+export const updateStudentName = async (studentId, newName) => {
+    try {
+        const result = await db.runAsync(
+            'UPDATE students SET name = ? WHERE id = ?',
+            [newName, studentId]
+        );
+        return result.changes;
+    } catch (error) {
+        console.error('Error updating student name:', error);
+        throw error;
+    }
+};
+
 // Attendance operations
 export const saveAttendance = async (className, date, attendance) => {
   return db.withTransactionAsync(async () => {
@@ -184,8 +204,9 @@ export const saveAttendance = async (className, date, attendance) => {
       );
       
       if (!classResult) throw new Error('Class not found');
-
+      const classId = classResult.id;
       const dateString = date.toDateString();
+
       const statement = await db.prepareAsync(`
         INSERT INTO attendance (class_id, student_id, date, present)
         VALUES (?, ?, ?, ?)
@@ -196,12 +217,12 @@ export const saveAttendance = async (className, date, attendance) => {
         for (const [rollNumber, isPresent] of Object.entries(attendance)) {
           const studentResult = await db.getFirstAsync(
             'SELECT id FROM students WHERE class_id = ? AND roll_number = ?',
-            [classResult.id, rollNumber]
+            [classId, rollNumber]
           );
           
           if (studentResult) {
             await statement.executeAsync([
-              classResult.id,
+              classId,
               studentResult.id,
               dateString,
               isPresent ? 1 : 0
@@ -245,6 +266,94 @@ export const getAttendanceForDate = async (className, date) => {
   }
 };
 
-// Add other necessary operations following similar patterns
+export const deleteAttendanceForDate = async (className, date) => {
+  try {
+    const classResult = await db.getFirstAsync(
+      'SELECT id FROM classes WHERE name = ?',
+      className
+    );
+    if (!classResult) {
+      console.log("No class found, nothing to delete.");
+      return 0;
+    }
+    const dateString = date.toDateString();
+    const result = await db.runAsync(
+      'DELETE FROM attendance WHERE class_id = ? AND date = ?',
+      [classResult.id, dateString]
+    );
+    return result.changes;
+  } catch (error) {
+    console.error('Error deleting attendance for date:', error);
+    throw error;
+  }
+};
+
+export const getAttendanceForStudent = async (className, studentId) => {
+  try {
+    const classResult = await db.getFirstAsync(
+      'SELECT id FROM classes WHERE name = ?',
+      className
+    );
+    if (!classResult) return [];
+
+    const result = await db.getAllAsync(`
+      SELECT date, present
+      FROM attendance
+      WHERE class_id = ? AND student_id = ?
+    `, [classResult.id, studentId]);
+
+    return result;
+  } catch (error) {
+    console.error('Error getting attendance for student:', error);
+    throw error;
+  }
+};
+
+export const getTotalClassesForStudent = async (className) => {
+  try {
+    const classResult = await db.getFirstAsync(
+      'SELECT id FROM classes WHERE name = ?',
+      className
+    );
+    if (!classResult) return 0;
+
+    const result = await db.getFirstAsync(`
+      SELECT COUNT(DISTINCT date) as count
+      FROM attendance
+      WHERE class_id = ?
+    `, [classResult.id]);
+
+    return result ? result.count : 0;
+  } catch (error) {
+    console.error('Error getting total classes:', error);
+    throw error;
+  }
+};
+
+export const getAllAttendanceForClass = async (className) => {
+  try {
+    const classResult = await db.getFirstAsync(
+      'SELECT id FROM classes WHERE name = ?',
+      className
+    );
+    if (!classResult) return [];
+
+    const result = await db.getAllAsync(`
+      SELECT
+        s.name,
+        s.roll_number as rollNumber,
+        a.date,
+        a.present
+      FROM attendance a
+      JOIN students s ON a.student_id = s.id
+      WHERE a.class_id = ?
+    `, [classResult.id]);
+
+    return result;
+  } catch (error) {
+    console.error('Error getting all attendance for class:', error);
+    throw error;
+  }
+};
 
 export default db;
