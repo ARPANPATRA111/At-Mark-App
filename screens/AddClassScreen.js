@@ -1,10 +1,10 @@
 // screens/AddClassScreen.js
 import React, { useState, useCallback } from 'react';
 import { Alert, View, StyleSheet, ScrollView, Text, FlatList } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import BaseScreen from '../components/BaseScreen';
 import CustomTextInput from '../components/CustomTextInput';
 import CustomButton from '../components/CustomButton';
+import { addClass as dbAddClass, getClasses } from '../services/db';
 import { colors, sizes, spacing } from '../theme';
 
 const PREDEFINED_BATCHES = {
@@ -195,12 +195,12 @@ export default function AddClassScreen({ navigation }) {
     students: PREDEFINED_BATCHES[key]
   }));
 
-  const addClass = async () => {
+  const handleAddClass = async () => {
     if (className.trim() === '') {
       Alert.alert('Error', 'Please enter a class name.');
       return;
     }
-    
+
     if (!selectedBatch) {
       Alert.alert('Error', 'Please select a batch.');
       return;
@@ -208,23 +208,16 @@ export default function AddClassScreen({ navigation }) {
 
     setLoading(true);
     try {
-      const classesData = await AsyncStorage.getItem('classes');
-      const classes = classesData ? JSON.parse(classesData) : [];
-      
-      if (classes.includes(className)) {
+      const existingClasses = await getClasses();
+      if (existingClasses.some(c => c.name === className)) {
         Alert.alert('Error', 'This class already exists.');
+        setLoading(false);
         return;
       }
-      
-      classes.push(className);
-      await AsyncStorage.setItem('classes', JSON.stringify(classes));
-      
+
       const batchStudents = PREDEFINED_BATCHES[selectedBatch];
-      await AsyncStorage.setItem(
-        `students_${className}`,
-        JSON.stringify(batchStudents)
-      );
-      
+      await dbAddClass(className, batchStudents);
+
       setClassName('');
       setSelectedBatch(null);
       Alert.alert('Success', 'Class created with students from the selected batch!', [
@@ -243,12 +236,12 @@ export default function AddClassScreen({ navigation }) {
   }, []);
 
   const renderBatchItem = useCallback(({ item }) => (
-    <BatchItem 
-      item={item} 
-      selectedBatch={selectedBatch} 
+    <BatchItem
+      item={item}
+      selectedBatch={selectedBatch}
       onSelect={handleSelectBatch}
     />
-  ), [selectedBatch]);
+  ), [selectedBatch, handleSelectBatch]);
 
   const renderStudentItem = useCallback(({ item }) => (
     <StudentItem item={item} />
@@ -297,10 +290,10 @@ export default function AddClassScreen({ navigation }) {
       
       <CustomButton
         title="Create Class"
-        onPress={addClass}
+        onPress={handleAddClass}
         iconName="add"
         loading={loading}
-        disabled={!className.trim() || !selectedBatch}
+        disabled={loading || !className.trim() || !selectedBatch}
         style={styles.createButton}
       />
     </BaseScreen>

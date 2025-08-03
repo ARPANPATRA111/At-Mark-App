@@ -11,11 +11,11 @@ import {
   ActivityIndicator,
   TouchableOpacity
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import BaseScreen from '../components/BaseScreen';
 import CustomButton from '../components/CustomButton';
+import { getStudents, deleteStudent as dbDeleteStudent, updateStudentName as dbUpdateStudentName, getAllAttendanceForClass } from '../services/db';
 import { colors, sizes } from '../theme';
 
 const StudentItem = React.memo(({ item, onEdit, onDelete, onPress }) => (
@@ -50,47 +50,35 @@ export default function ClassScreen({ route, navigation }) {
   const [isModalVisible, setModalVisible] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
-  const sortedStudents = [...students].sort((a, b) =>
-    a.name.localeCompare(b.name)
-  );
+  const loadStudents = useCallback(async () => {
+    try {
+      const studentsData = await getStudents(className);
+      setStudents(studentsData.sort((a, b) => a.name.localeCompare(b.name)));
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Error", "Failed to load students.");
+    }
+  }, [className]);
 
   useEffect(() => {
     navigation.setOptions({ title: className });
-    const loadStudents = async () => {
-      try {
-        const studentsData = await AsyncStorage.getItem(`students_${className}`);
-        if (studentsData) setStudents(JSON.parse(studentsData));
-      } catch (error) {
-        console.error(error);
-      }
-    };
-
     const unsubscribe = navigation.addListener('focus', loadStudents);
     return unsubscribe;
-  }, [navigation, className]);
+  }, [navigation, className, loadStudents]);
 
-  const handleDeleteStudent = useCallback(async (rollNumber) => {
+  const handleDeleteStudent = useCallback(async (studentId) => {
     Alert.alert(
       'Confirm Deletion',
       'Are you sure you want to delete this student?',
       [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
+        { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
             try {
-              const updatedStudents = students.filter(
-                (student) => student.rollNumber !== rollNumber
-              );
-              setStudents(updatedStudents);
-              await AsyncStorage.setItem(
-                `students_${className}`,
-                JSON.stringify(updatedStudents)
-              );
+              await dbDeleteStudent(studentId);
+              loadStudents();
               Alert.alert('Success', 'Student deleted successfully.');
             } catch (error) {
               console.error('Error deleting student:', error);
@@ -100,7 +88,7 @@ export default function ClassScreen({ route, navigation }) {
         },
       ]
     );
-  }, [className, students]);
+  }, [loadStudents]);
 
   const handleEditButton = useCallback((student) => {
     setSelectedStudent(student);
@@ -115,23 +103,15 @@ export default function ClassScreen({ route, navigation }) {
     }
 
     try {
-      const updatedStudents = students.map((student) =>
-        student.rollNumber === selectedStudent.rollNumber
-          ? { ...student, name: newName }
-          : student
-      );
-      setStudents(updatedStudents);
-      await AsyncStorage.setItem(
-        `students_${className}`,
-        JSON.stringify(updatedStudents)
-      );
+      await dbUpdateStudentName(selectedStudent.id, newName);
       setModalVisible(false);
+      loadStudents();
       Alert.alert('Success', 'Student name updated successfully.');
     } catch (error) {
       console.error('Failed to update student:', error);
       Alert.alert('Error', 'Could not update the student name.');
     }
-  }, [className, newName, selectedStudent, students]);
+  }, [newName, selectedStudent, loadStudents]);
 
   const handleStudentPress = useCallback((student) => {
     navigation.navigate('StudentAttendance', { className, student });
@@ -142,54 +122,41 @@ export default function ClassScreen({ route, navigation }) {
       item={item}
       onPress={() => handleStudentPress(item)}
       onEdit={() => handleEditButton(item)}
-      onDelete={() => handleDeleteStudent(item.rollNumber)}
+      onDelete={() => handleDeleteStudent(item.id)}
     />
   ), [handleStudentPress, handleEditButton, handleDeleteStudent]);
 
   const exportAttendanceHistory = async () => {
     setIsExporting(true);
     try {
-      const studentsData = await AsyncStorage.getItem(`students_${className}`);
-      if (!studentsData) {
-        Alert.alert('No Data', 'No student data available.');
-        setIsExporting(false);
-        return;
-      }
-  
-      const studentsList = JSON.parse(studentsData);
-      const keys = await AsyncStorage.getAllKeys();
-      const attendanceKeys = keys.filter((key) =>
-        key.startsWith(`attendance_${className}_`)
-      );
+      const allAttendanceRecords = await getAllAttendanceForClass(className);
 
-      if (attendanceKeys.length === 0) {
+      if (allAttendanceRecords.length === 0) {
         Alert.alert('No Data', 'No attendance history to export.');
         setIsExporting(false);
         return;
       }
 
-      // Process attendance data
+      const studentsList = await getStudents(className);
+
       const attendanceData = {};
       const uniqueDates = new Set();
 
-      for (const key of attendanceKeys) {
-        const date = key.replace(`attendance_${className}_`, '');
-        uniqueDates.add(date);
-        const attendanceRecord = await AsyncStorage.getItem(key);
-        const attendance = JSON.parse(attendanceRecord || '{}');
-
-        studentsList.forEach((student) => {
-          if (!attendanceData[student.rollNumber]) {
-            attendanceData[student.rollNumber] = {
-              name: student.name,
-              rollNumber: student.rollNumber,
-              attendance: {}
-            };
-          }
-          attendanceData[student.rollNumber].attendance[date] = attendance[student.rollNumber] ? 'P' : 'A';
-        });
-      }
-
+      studentsList.forEach(student => {
+        attendanceData[student.rollNumber] = {
+          name: student.name,
+          rollNumber: student.rollNumber,
+          attendance: {}
+        };
+      });
+      
+      allAttendanceRecords.forEach(record => {
+        uniqueDates.add(record.date);
+        if (attendanceData[record.rollNumber]) {
+          attendanceData[record.rollNumber].attendance[record.date] = record.present ? 'P' : 'A';
+        }
+      });
+      
       const sortedDates = Array.from(uniqueDates).sort((a, b) => new Date(a) - new Date(b));
       const MAX_DATES_PER_PAGE = 18;
       const MAX_STUDENTS_PER_PAGE = 50;
@@ -237,16 +204,18 @@ export default function ClassScreen({ route, navigation }) {
           <h2>Generated on: ${new Date().toLocaleDateString()}</h2>
       `;
 
+      const studentEntries = Object.values(attendanceData);
       for (let datePage = 0; datePage < totalDatePages; datePage++) {
         const startDateIdx = datePage * MAX_DATES_PER_PAGE;
         const endDateIdx = Math.min(startDateIdx + MAX_DATES_PER_PAGE, sortedDates.length);
         const datesForPage = sortedDates.slice(startDateIdx, endDateIdx);
 
-        const studentEntries = Object.values(attendanceData);
         for (let studentPage = 0; studentPage < totalStudentPages; studentPage++) {
           const startStudentIdx = studentPage * MAX_STUDENTS_PER_PAGE;
           const endStudentIdx = Math.min(startStudentIdx + MAX_STUDENTS_PER_PAGE, studentEntries.length);
           const studentsForPage = studentEntries.slice(startStudentIdx, endStudentIdx);
+
+          if (studentsForPage.length === 0) continue;
 
           htmlContent += `
             <table>
@@ -274,7 +243,7 @@ export default function ClassScreen({ route, navigation }) {
             `;
 
             datesForPage.forEach(date => {
-              const status = student.attendance[date] || '';
+              const status = student.attendance[date] || '-';
               htmlContent += `<td class="${status}">${status}</td>`;
             });
 
@@ -326,10 +295,10 @@ export default function ClassScreen({ route, navigation }) {
 
   return (
     <BaseScreen>
-      <Text style={styles.studentNumber}>Number of Students: {sortedStudents.length}</Text>
+      <Text style={styles.studentNumber}>Number of Students: {students.length}</Text>
       <FlatList
-        data={sortedStudents}
-        keyExtractor={(item) => item.rollNumber.toString()}
+        data={students}
+        keyExtractor={(item) => item.id.toString()}
         renderItem={renderItem}
         windowSize={10}
         initialNumToRender={15}
@@ -428,7 +397,7 @@ const styles = StyleSheet.create({
     borderRadius: sizes.radius,
     textAlign: 'center',
     padding: sizes.base / 2,
-    margin: sizes.base,
+    margin: sizes.base / 2,
   },
   rollNumber: {
     fontSize: sizes.base - 2,
