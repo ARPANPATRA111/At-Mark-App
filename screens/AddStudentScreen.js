@@ -1,38 +1,38 @@
 // screens/AddStudentScreen.js
 import React, { useState } from 'react';
 import {
-  View, TextInput, StyleSheet,
-  Button, Alert,
+  View, StyleSheet,
+  Alert,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage'; // Correct import
 import CustomButton from '../components/CustomButton';
 import CustomTextInput from '../components/CustomTextInput';
+import { addStudent, getStudents } from '../services/db';
 
 export default function AddStudentScreen({ route, navigation }) {
   const { className } = route.params;
   const [studentName, setStudentName] = useState('');
   const [rollNumber, setRollNumber] = useState('');
 
-  const addStudent = async () => {
+  const handleAddStudent = async () => {
     if (studentName.trim() === '' || rollNumber.trim() === '') {
       Alert.alert('Error', 'Please enter student name and roll number.');
       return;
     }
     try {
-      const studentsData = await AsyncStorage.getItem(`students_${className}`);
-      const students = studentsData ? JSON.parse(studentsData) : [];
-      if (students.find((s) => s.rollNumber === rollNumber)) {
+      const existingStudents = await getStudents(className);
+      if (existingStudents.find((s) => s.rollNumber === rollNumber)) {
         Alert.alert('Error', 'This roll number already exists in the class.');
         return;
       }
-      students.push({ name: studentName, rollNumber });
-      await AsyncStorage.setItem(`students_${className}`, JSON.stringify(students));
+      await addStudent(className, { name: studentName, rollNumber });
       setStudentName('');
       setRollNumber('');
-      alert('Student added successfully!');
-      // navigation.navigate('Class', { className });
+      Alert.alert('Success', 'Student added successfully!', [
+        { text: 'OK', onPress: () => navigation.goBack() }
+      ]);
     } catch (error) {
       console.error(error);
+      Alert.alert('Error', 'Failed to add student.');
     }
   };
 
@@ -44,12 +44,13 @@ export default function AddStudentScreen({ route, navigation }) {
         onChangeText={setStudentName}
       />
       <CustomTextInput
-        placeholder="Mobile Number"
+        placeholder="Roll Number"
         value={rollNumber}
         onChangeText={setRollNumber}
-        keyboardType="numeric"
+        keyboardType="default"
+        style={{marginTop: 10, marginBottom: 20}}
       />
-      <CustomButton title="Add Student" onPress={addStudent} />   
+      <CustomButton title="Add Student" onPress={handleAddStudent} />
     </View>
   );
 }
