@@ -1,12 +1,12 @@
-// screens/AttendenceHistoryScreen.js
+// screens/AttendanceHistoryScreen.js
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList,
   TouchableOpacity, Platform,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
+import { getStudents, getAttendanceForDate } from '../services/db';
 import { colors, sizes } from '../theme';
 
 const PresentStudentItem = React.memo(({ item }) => (
@@ -28,37 +28,27 @@ export default function AttendanceHistoryScreen({ route }) {
   }, []);
 
   const onChangeDate = useCallback((event, selectedDate) => {
+    setShowDatePicker(Platform.OS === 'ios');
     if (event.type === 'set') {
       const currentDate = selectedDate || date;
-      setShowDatePicker(Platform.OS === 'ios');
       setDate(currentDate);
-    } else {
-      setShowDatePicker(Platform.OS === 'ios');
     }
   }, [date]);
 
   useEffect(() => {
-    const loadAttendance = async () => {
+    const loadData = async () => {
       try {
-        const studentsData = await AsyncStorage.getItem(`students_${className}`);
-        if (studentsData) {
-          setStudents(JSON.parse(studentsData));
-        } else {
-          setStudents([]);
-        }
+        const studentList = await getStudents(className);
+        setStudents(studentList);
 
-        const attendanceKey = `attendance_${className}_${date.toDateString()}`;
-        const attendanceData = await AsyncStorage.getItem(attendanceKey);
-        if (attendanceData) {
-          setAttendance(JSON.parse(attendanceData));
-        } else {
-          setAttendance({});
-        }
+        const attendanceData = await getAttendanceForDate(className, date);
+        setAttendance(attendanceData);
       } catch (error) {
         console.error(error);
+        Alert.alert("Error", "Could not load attendance history.");
       }
     };
-    loadAttendance();
+    loadData();
   }, [className, date]);
 
   const presentStudents = students.filter(
@@ -69,7 +59,7 @@ export default function AttendanceHistoryScreen({ route }) {
     <PresentStudentItem item={item} />
   ), []);
 
-  const formatDate = useCallback((date) => format(date, 'EEEE, MMMM d, yyyy'), []);
+  const formatDate = useCallback((d) => format(d, 'EEEE, MMMM d, yyyy'), []);
 
   return (
     <View style={styles.container}>

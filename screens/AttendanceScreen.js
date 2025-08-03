@@ -1,12 +1,12 @@
-// screens/AttendenceScreen.js
+// screens/AttendanceScreen.js
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, FlatList, Alert, Platform, StyleSheet } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { format } from 'date-fns';
 import BaseScreen from '../components/BaseScreen';
 import CustomButton from '../components/CustomButton';
+import { getStudents, saveAttendance, getAttendanceForDate, deleteAttendanceForDate } from '../services/db';
 import { colors, sizes, spacing } from '../theme';
 
 const AttendanceItem = React.memo(({ item, isPresent, onToggle }) => (
@@ -40,76 +40,45 @@ export default function AttendanceScreen({ route, navigation }) {
   const [date, setDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
 
+  const loadData = useCallback(async (newDate) => {
+    try {
+      const studentList = await getStudents(className);
+      setStudents(studentList);
+
+      const attendanceData = await getAttendanceForDate(className, newDate);
+      setAttendance(attendanceData);
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Error", "Could not load data.");
+    }
+  }, [className]);
+
+  useEffect(() => {
+    loadData(date);
+  }, [className, date, loadData]);
+
   const showDatepicker = useCallback(() => {
     setShowDatePicker(true);
   }, []);
 
   const onChangeDate = useCallback((event, selectedDate) => {
+    setShowDatePicker(Platform.OS === 'ios');
     if (event.type === 'set') {
       const currentDate = selectedDate || date;
-      setShowDatePicker(Platform.OS === 'ios');
       setDate(currentDate);
-    } else {
-      setShowDatePicker(Platform.OS === 'ios');
     }
   }, [date]);
 
-  const deleteAttendanceForDay = useCallback(async () => {
-    try {
-      const attendanceKey = `attendance_${className}_${date.toDateString()}`;
-  
-      const keys = await AsyncStorage.getAllKeys();
-      if (!keys.includes(attendanceKey)) {
-        Alert.alert('Error', 'No attendance record found for the selected date.');
-        return;
-      }
-  
-      await AsyncStorage.removeItem(attendanceKey);
-  
-      Alert.alert('Success', `Attendance for ${formatDate(date)} has been deleted.`);
-      setAttendance({});
-    } catch (error) {
-      console.error('Error deleting attendance record:', error);
-      Alert.alert('Error', 'Failed to delete attendance record.');
-    }
-  }, [className, date]);
-
-  useEffect(() => {
-    const loadAttendanceData = async () => {
-      try {
-        const studentsData = await AsyncStorage.getItem(`students_${className}`);
-        if (studentsData) setStudents(JSON.parse(studentsData));
-
-        const attendanceKey = `attendance_${className}_${date.toDateString()}`;
-        const attendanceData = await AsyncStorage.getItem(attendanceKey);
-        if (attendanceData) {
-          setAttendance(JSON.parse(attendanceData));
-        } else {
-          setAttendance({});
-        }
-      } catch (error) {
-        console.error(error);
-      }
-    };
-    loadAttendanceData();
-  }, [className, date]);
-
   const toggleAttendance = useCallback((student) => {
-    setAttendance(prevAttendance => {
-      const updatedAttendance = { ...prevAttendance };
-      if (updatedAttendance[student.rollNumber]) {
-        delete updatedAttendance[student.rollNumber];
-      } else {
-        updatedAttendance[student.rollNumber] = true;
-      }
-      return updatedAttendance;
-    });
+    setAttendance(prev => ({
+      ...prev,
+      [student.rollNumber]: !prev[student.rollNumber],
+    }));
   }, []);
 
   const handleSubmit = useCallback(async () => {
     try {
-      const attendanceKey = `attendance_${className}_${date.toDateString()}`;
-      await AsyncStorage.setItem(attendanceKey, JSON.stringify(attendance));
+      await saveAttendance(className, date, attendance);
       Alert.alert('Success', 'Attendance has been saved.');
     } catch (error) {
       console.error(error);
@@ -117,12 +86,40 @@ export default function AttendanceScreen({ route, navigation }) {
     }
   }, [attendance, className, date]);
 
-  const formatDate = useCallback((date) => format(date, 'EEEE, MMMM d, yyyy'), []);
+  const handleDeleteAttendance = useCallback(() => {
+    Alert.alert(
+      "Delete Attendance",
+      `Are you sure you want to delete the attendance record for ${formatDate(date)}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const changes = await deleteAttendanceForDate(className, date);
+              if (changes > 0) {
+                setAttendance({}); // Clear the state
+                Alert.alert("Success", "Attendance record for this date has been deleted.");
+              } else {
+                Alert.alert("Info", "No attendance record found for this date to delete.");
+              }
+            } catch (error) {
+              console.error(error);
+              Alert.alert("Error", "Failed to delete attendance record.");
+            }
+          }
+        }
+      ]
+    );
+  }, [className, date, formatDate]);
+
+  const formatDate = useCallback((d) => format(d, 'EEEE, MMMM d, yyyy'), []);
 
   const renderItem = useCallback(({ item }) => (
     <AttendanceItem
       item={item}
-      isPresent={attendance[item.rollNumber]}
+      isPresent={!!attendance[item.rollNumber]}
       onToggle={() => toggleAttendance(item)}
     />
   ), [attendance, toggleAttendance]);
@@ -156,12 +153,12 @@ export default function AttendanceScreen({ route, navigation }) {
           <Text style={styles.statLabel}>Total</Text>
         </View>
         <View style={styles.statItem}>
-          <Text style={styles.statValue}>{Object.keys(attendance).length}</Text>
+          <Text style={styles.statValue}>{Object.values(attendance).filter(Boolean).length}</Text>
           <Text style={styles.statLabel}>Present</Text>
         </View>
         <View style={styles.statItem}>
           <Text style={styles.statValue}>
-            {students.length - Object.keys(attendance).length}
+            {students.length - Object.values(attendance).filter(Boolean).length}
           </Text>
           <Text style={styles.statLabel}>Absent</Text>
         </View>
@@ -180,11 +177,10 @@ export default function AttendanceScreen({ route, navigation }) {
       <View style={styles.footer}>
         <CustomButton
           title="Delete"
-          onPress={deleteAttendanceForDay}
+          onPress={handleDeleteAttendance}
           style={styles.deleteButton}
           textStyle={styles.buttonText}
           iconName="delete"
-          iconColor="#fff"
         />
         <CustomButton
           title="Submit"
@@ -192,7 +188,6 @@ export default function AttendanceScreen({ route, navigation }) {
           style={styles.submitButton}
           textStyle={styles.buttonText}
           iconName="check-circle"
-          iconColor="#fff"
         />
       </View>
     </BaseScreen>
